@@ -6,7 +6,7 @@ import os
 class NutritionService:
     def __init__(self):
         self.db_url = os.environ['DATABASE_URL']
-        print(f"NutritionService initialized with db_url: {self.db_url}")
+        print(f"NutritionService initialized with PostgreSQL connection")
 
     def log_meal(self, phone_number, meal_data):
         try:
@@ -46,10 +46,10 @@ class NutritionService:
                 SELECT 
                     %s, 
                     %s, 
-                    SUM(calories),
-                    SUM(protein),
-                    SUM(carbs),
-                    SUM(fat)
+                    COALESCE(SUM(calories), 0),
+                    COALESCE(SUM(protein), 0),
+                    COALESCE(SUM(carbs), 0),
+                    COALESCE(SUM(fat), 0)
                 FROM meals 
                 WHERE phone_number = %s AND date = %s
             """, (phone_number, current_date, phone_number, current_date))
@@ -70,16 +70,17 @@ class NutritionService:
             conn = psycopg2.connect(self.db_url)
             cursor = conn.cursor()
 
-            # Check what meals exist in the database
+            # First, let's check what meals exist in the database
             print("\nChecking all meals in database:")
             cursor.execute("SELECT date, calories, protein, carbs, fat FROM meals")
             all_meals = cursor.fetchall()
             print(f"All meals: {all_meals}")
 
+            # Now check today's date format
             today = date.today().isoformat()
             print(f"\nToday's date (ISO format): {today}")
 
-            # Check today's meals
+            # Check specifically for today's meals
             cursor.execute("""
                 SELECT date, calories, protein, carbs, fat 
                 FROM meals 
@@ -88,13 +89,13 @@ class NutritionService:
             todays_meals = cursor.fetchall()
             print(f"\nToday's meals: {todays_meals}")
 
-            # Progress query with totals
+            # Progress query with totals using COALESCE for NULL handling
             progress_query = """
             SELECT 
-                COALESCE(SUM(calories), 0) as total_calories,
-                COALESCE(SUM(protein), 0) as total_protein,
-                COALESCE(SUM(carbs), 0) as total_carbs,
-                COALESCE(SUM(fat), 0) as total_fat
+                COALESCE(SUM(calories), 0.0) as total_calories,
+                COALESCE(SUM(protein), 0.0) as total_protein,
+                COALESCE(SUM(carbs), 0.0) as total_carbs,
+                COALESCE(SUM(fat), 0.0) as total_fat
             FROM meals
             WHERE phone_number = %s AND date = %s
             """
@@ -105,10 +106,10 @@ class NutritionService:
 
             totals = {
                 "totals": {
-                    "calories": float(result[0]) if result[0] else 0,
-                    "protein": float(result[1]) if result[1] else 0,
-                    "carbs": float(result[2]) if result[2] else 0,
-                    "fat": float(result[3]) if result[3] else 0
+                    "calories": float(result[0]) if result[0] is not None else 0.0,
+                    "protein": float(result[1]) if result[1] is not None else 0.0,
+                    "carbs": float(result[2]) if result[2] is not None else 0.0,
+                    "fat": float(result[3]) if result[3] is not None else 0.0
                 }
             }
 

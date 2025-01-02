@@ -1,10 +1,12 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from twilio.twiml.messaging_response import MessagingResponse
 from services.vision_service import VisionService
 from services.nutrition_services import NutritionService
 from services.user_services import UserService
 import os
 from dotenv import load_dotenv
+from datetime import datetime
+import json
 
 # Load environment variables
 load_dotenv()
@@ -17,64 +19,90 @@ vision_service = VisionService()
 nutrition_service = NutritionService()
 user_service = UserService()
 
-# Hebrew translations dictionary
-HEBREW_MESSAGES = {
-    'calories': 'קלוריות',
-    'protein': 'חלבון',
-    'carbs': 'פחמימות',
-    'fat': 'שומן',
-    'meal_logged': 'הארוחה נוספה בהצלחה! ✅',
-    'analysis_failed': 'מצטער, לא הצלחתי לנתח את התמונה: ',
-    'no_meals_today': 'לא נרשמו ארוחות היום! שלח לי תמונה של האוכל שלך כדי להתחיל.',
-    'daily_summary': '🎯 סיכום יומי:\n\n',
-    'set_goals': 'הגדר את היעדים התזונתיים היומיים שלך בפורמט הבא:\nלהגדיר יעדים קלוריות חלבון פחמימות שומן\nלדוגמה: להגדיר יעדים 2000 150 200 60',
-    'goals_set': 'היעדים התזונתיים היומיים שלך עודכנו בהצלחה! 🎉',
-    'invalid_goals': 'פורמט היעדים אינו תקין. אנא נסה שוב לפי ההוראות.',
-    'progress_bars': '📊 התקדמות יומית:\n',
-    'goal_reached': '🎉 כל הכבוד! הגעת ליעד היומי שלך עבור {nutrient}! 💪',
-    'help_message': '''👋 איך אני יכול לעזור:
-
-📸 שלח תמונת מזון: אנתח אותה ואעקוב אחר הערכים התזונתיים
-📊 כתוב 'סיכום': לצפייה בסיכום התזונה היומי 
-🎯 כתוב 'להגדיר יעדים': להגדרת היעדים התזונתיים היומיים שלך
-📈 כתוב 'יעדים': להצגת ההתקדמות שלך ביחס ליעדים
-❓ כתוב 'עזרה': להצגת הודעה זו שוב
-
-אשמח לעזור לך לעקוב אחר המסע התזונתי שלך! 🌟''',
-    'welcome_message': '''👋 היי, אני כאן כדי לעזור לך לעקוב אחר התזונה שלך! 🍎📝
-
-אתה יכול:
-📸 לשלוח לי תמונה של האוכל שלך ואני אנתח אותה  
-📊 לכתוב 'סיכום' לקבלת סיכום יומי
-🎯 לכתוב 'להגדיר יעדים' כדי להגדיר יעדים תזונתיים יומיים
-📈 לכתוב 'יעדים' כדי לראות את ההתקדמות שלך
-
-כתוב 'עזרה' בכל עת לקבלת מידע נוסף! 😊'''
+# Messages dictionary for bilingual support
+MESSAGES = {
+    'he': {
+        'calories': 'קלוריות',
+        'protein': 'חלבון',
+        'carbs': 'פחמימות',
+        'fat': 'שומן',
+        'meal_logged': 'הארוחה נוספה בהצלחה! ✅',
+        'analysis_failed': 'מצטער, לא הצלחתי לנתח את התמונה: ',
+        'no_meals_today': 'לא נרשמו ארוחות היום! שלח לי תמונה של האוכל שלך כדי להתחיל.',
+        'daily_summary': '🎯 סיכום יומי:\n\n',
+        'set_goals': 'הגדר את היעדים התזונתיים היומיים שלך בפורמט הבא:\nלהגדיר יעדים קלוריות חלבון פחמימות שומן\nלדוגמה: להגדיר יעדים 2000 150 200 60',
+        'goals_set': 'היעדים התזונתיים היומיים שלך עודכנו בהצלחה! 🎉',
+        'invalid_goals': 'פורמט היעדים אינו תקין. אנא נסה שוב לפי ההוראות.',
+        'help_message': '''👋 איך אני יכול לעזור:
+            📸 שלח תמונת מזון: לניתוח אוטומטי
+            📊 כתוב 'סיכום': לסיכום יומי
+            🎯 כתוב 'להגדיר יעדים': להגדרת יעדים
+            ❓ כתוב 'עזרה': להוראות''',
+        'unauthorized': '🔒 אנא שלח את הסיסמה כדי להתחיל להשתמש בבוט.',
+        'auth_success': '✅ ברוך הבא! אתה מורשה להשתמש בבוט.',
+        'auth_failed': '❌ סיסמה שגויה, אנא נסה שוב.',
+        'general_chat': 'היי! אני בוט שעוזר במעקב אחרי תזונה. שלח "עזרה" לקבלת רשימת הפקודות.'
+    },
+    'en': {
+        'calories': 'Calories',
+        'protein': 'Protein',
+        'carbs': 'Carbs',
+        'fat': 'Fat',
+        'meal_logged': 'Meal logged successfully! ✅',
+        'analysis_failed': 'Sorry, I could not analyze the image: ',
+        'no_meals_today': 'No meals logged today! Send me a food photo to get started.',
+        'daily_summary': '🎯 Daily Summary:\n\n',
+        'set_goals': 'Set your daily nutritional goals using the format:\nset goals calories protein carbs fat\nExample: set goals 2000 150 200 60',
+        'goals_set': 'Your daily nutritional goals have been updated successfully! 🎉',
+        'invalid_goals': 'Invalid goals format. Please try again following the instructions.',
+        'help_message': '''👋 How can I help:
+            📸 Send food photo: for automatic analysis
+            📊 Type 'summary': for daily summary
+            🎯 Type 'set goals': to set goals
+            ❓ Type 'help': for instructions''',
+        'unauthorized': '🔒 Please send the password to start using the bot.',
+        'auth_success': '✅ Welcome! You are authorized to use the bot.',
+        'auth_failed': '❌ Incorrect password, please try again.',
+        'general_chat': "Hi! I'm a nutrition tracking bot. Send 'help' for a list of commands."
+    }
 }
 
-@app.route('/')
-def home():
-    return "Bot is running!"
+
+def detect_language(text):
+    """Detect if the message is in English or Hebrew"""
+    # Simple detection based on ASCII characters
+    if text and all(ord(char) < 128 for char in text):
+        return 'en'
+    return 'he'
+
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         incoming_msg = request.values.get('Body', '').lower()
         media_url = request.values.get('MediaUrl0')
-        response = MessagingResponse()
         phone_number = request.values.get('From')
 
-        # Register user if not already registered
-        user_service.register_user(phone_number)
+        response = MessagingResponse()
+        lang = detect_language(incoming_msg)
+        msgs = MESSAGES[lang]
 
-        msg = None
+        # Handle password authorization
+        if incoming_msg == '3233':
+            result = user_service.register_user(phone_number, password='3233')
+            response.message(msgs['auth_success'] if result['status'] == 'success' else msgs['auth_failed'])
+            return str(response)
 
+        # Check authorization for all other requests
+        auth_check = user_service.get_user_goals(phone_number)
+        if auth_check['status'] == 'error' and 'not authorized' in auth_check['message']:
+            response.message(msgs['unauthorized'])
+            return str(response)
+
+        # Handle media (food photos)
         if media_url:
             print(f"Received image URL: {media_url}")
-            twilio_auth = (
-                os.getenv('TWILIO_ACCOUNT_SID'),
-                os.getenv('TWILIO_AUTH_TOKEN')
-            )
-
+            twilio_auth = (os.getenv('TWILIO_ACCOUNT_SID'), os.getenv('TWILIO_AUTH_TOKEN'))
             result = vision_service.analyze_food_image(media_url, twilio_auth)
 
             if isinstance(result, dict) and result.get('success'):
@@ -93,155 +121,74 @@ def webhook():
                     }
 
                     success = nutrition_service.log_meal(phone_number, meal_data)
-                    if success:
-                        msg = "🍳 ניתוח ארוחה\n"
-                        msg += "──────────────\n\n"
-
-                        # Add food items section
-                        food_items = meal_data.get('food_items', [])
-                        if food_items:
-                            for item in food_items:
-                                msg += f"• {item}\n"
-                            msg += "\n"
-
-                        # Add nutrition section with emojis and alignment
-                        msg += "📊 ערכים תזונתיים:\n"
-                        msg += f"🔥 קלוריות:  {meal_data['calories']} קק״ל\n"
-                        msg += f"🥩 חלבון:    {meal_data['protein']} גרם\n"
-                        msg += f"🌾 פחמימות: {meal_data['carbs']} גרם\n"
-                        msg += f"🥑 שומן:     {meal_data['fat']} גרם\n"
-
-                        msg += "\n──────────────\n"
-                        msg += "✅ הארוחה נוספה בהצלחה!"
-                    else:
-                        msg = "שגיאה ברישום הארוחה. אנא נסה שוב."
+                    msg = f"{analysis_data}\n\n{msgs['meal_logged']}" if success else "Error logging meal. Please try again."
                 else:
-                    msg = HEBREW_MESSAGES['analysis_failed'] + "התוצאה אינה תקינה."
+                    msg = msgs['analysis_failed'] + "Invalid result."
             else:
-                error_message = result.get('error', "התוצאה אינה תקינה.")
-                msg = f"{HEBREW_MESSAGES['analysis_failed']}{error_message}"
+                error_message = result.get('error', "Invalid result.")
+                msg = f"{msgs['analysis_failed']}{error_message}"
 
+        # Handle text commands
         else:
-            if incoming_msg == 'סיכום':
-                print("\n=== Debug: Processing סיכום command ===")
-                progress_data = nutrition_service.get_daily_progress(phone_number)
-                print(f"Progress data received: {progress_data}")
-
-                if progress_data and progress_data.get('totals'):
-                    totals = progress_data["totals"]
-                    print(f"Totals extracted: {totals}")
-
-                    # Enhanced summary format
-                    msg = "📊 סיכום יומי\n"
-                    msg += "──────────────\n"
-
-                    # Calories with emoji
-                    msg += f"🔥 קלוריות: {int(totals['calories'])} קק״ל\n"
-
-                    # Macronutrients with emojis and spacing
-                    msg += f"🥩 חלבון:    {int(totals['protein'])} גרם\n"
-                    msg += f"🌾 פחמימות: {int(totals['carbs'])} גרם\n"
-                    msg += f"🥑 שומן:     {int(totals['fat'])} גרם\n"
-
-                    # Add separator
-                    msg += "──────────────\n"
-
-                    # Add encouraging message based on progress
-                    if totals['calories'] > 0:
-                        msg += "💪 המשך כך! זוכרים לצלם את כל הארוחות"
+            # English commands
+            if lang == 'en':
+                if incoming_msg == 'summary':
+                    progress_data = nutrition_service.get_daily_progress(phone_number)
+                    if progress_data:
+                        totals = progress_data["totals"]
+                        msg = msgs['daily_summary']
+                        msg += f"{msgs['calories']}: {totals['calories']} kcal\n"
+                        msg += f"{msgs['protein']}: {totals['protein']}g\n"
+                        msg += f"{msgs['carbs']}: {totals['carbs']}g\n"
+                        msg += f"{msgs['fat']}: {totals['fat']}g\n\n"
                     else:
-                        msg += "📸 צלם את הארוחה הבאה שלך כדי לעקוב אחרי התזונה"
+                        msg = msgs['no_meals_today']
+
+                elif incoming_msg.startswith('set goals'):
+                    try:
+                        parts = incoming_msg.split()
+                        calories, protein, carbs, fat = map(int, parts[-4:])
+                        user_service.set_user_goals(phone_number, calories, protein, carbs, fat)
+                        msg = msgs['goals_set']
+                    except:
+                        msg = msgs['invalid_goals']
+
+                elif incoming_msg == 'help':
+                    msg = msgs['help_message']
+
                 else:
-                    msg = "לא נרשמו ארוחות היום! שלח לי תמונה של האוכל שלך כדי להתחיל. 📸"
+                    msg = msgs['general_chat']
 
-                print(f"Final message: {msg}")
-
-            elif incoming_msg == 'יעדים':
-                print("\n=== Debug: Processing יעדים command ===")
-                goals = user_service.get_user_goals(phone_number)
-                progress_data = nutrition_service.get_daily_progress(phone_number)
-
-                print(f"Goals retrieved: {goals}")
-                print(f"Progress data retrieved: {progress_data}")
-
-                if goals and progress_data and progress_data.get('totals'):
-                    totals = progress_data['totals']
-                    msg = HEBREW_MESSAGES['progress_bars']
-                    print(f"Starting with totals: {totals}")
-
-                    for nutrient in ['calories', 'protein', 'carbs', 'fat']:
-                        goal = float(goals.get(nutrient, 0))
-                        actual = float(totals.get(nutrient, 0))
-
-                        print(f"\nDebug - {nutrient}:")
-                        print(f"Actual: {actual}, Goal: {goal}")
-
-                        percentage = (actual / goal * 100) if goal > 0 else 0
-                        filled_bars = int(percentage // 10)
-
-                        print(f"Percentage: {percentage:.1f}%")
-                        print(f"Filled bars: {filled_bars}")
-
-                        bar = '█' * filled_bars + '░' * (10 - filled_bars)
-
-                        if nutrient == 'calories':
-                            msg += f"קלוריות: {int(actual)}/{int(goal)} {bar}\n"
-                        elif nutrient == 'protein':
-                            msg += f"חלבון: {int(actual)}/{int(goal)} {bar}\n"
-                        elif nutrient == 'carbs':
-                            msg += f"פחמימות: {int(actual)}/{int(goal)} {bar}\n"
-                        elif nutrient == 'fat':
-                            msg += f"שומן: {int(actual)}/{int(goal)} {bar}\n"
-
-                        print(f"Generated line: {msg.splitlines()[-1]}")
-                else:
-                    msg = "לא נמצאו יעדים או נתוני מעקב. נסה להגדיר יעדים ולהזין ארוחות."
-
-                print(f"Final message: {msg}")
-
-            elif incoming_msg.startswith('להגדיר יעדים'):
-                print("\n=== Debug: Processing להגדיר יעדים command ===")
-                try:
-                    parts = incoming_msg.split()
-                    if len(parts) == 6:  # Command word1 word2 + 4 values
-                        # Parse the values
-                        calories = int(parts[2])
-                        protein = int(parts[3])
-                        carbs = int(parts[4])
-                        fat = int(parts[5])
-
-                        print(f"Setting goals: calories={calories}, protein={protein}, carbs={carbs}, fat={fat}")
-
-                        # Actually set the goals in the database
-                        if user_service.set_user_goals(phone_number, calories, protein, carbs, fat):
-                            msg = f"""✅ היעדים החדשים שלך נקבעו:
-
-🔥 קלוריות: {calories} קק״ל
-🥩 חלבון:    {protein}g
-🌾 פחמימות: {carbs}g  
-🥑 שומן:     {fat}g
-
-שלח 'יעדים' כדי לראות את ההתקדמות שלך! 📊"""
-                        else:
-                            msg = "❌ חלה שגיאה בהגדרת היעדים. אנא נסה שוב."
-                    else:
-                        msg = HEBREW_MESSAGES['set_goals']  # Show the instruction message
-                        print(f"Invalid format: received {len(parts)} parts instead of 6")
-                except ValueError as e:
-                    print(f"Value error parsing goals: {e}")
-                    msg = HEBREW_MESSAGES['invalid_goals']
-                except Exception as e:
-                    print(f"Error setting goals: {e}")
-                    msg = HEBREW_MESSAGES['invalid_goals']
-
-            elif incoming_msg == 'עזרה':
-                msg = HEBREW_MESSAGES['help_message']
-
+            # Hebrew commands
             else:
-                msg = HEBREW_MESSAGES['welcome_message']
+                if incoming_msg == 'סיכום':
+                    progress_data = nutrition_service.get_daily_progress(phone_number)
+                    if progress_data:
+                        totals = progress_data["totals"]
+                        msg = msgs['daily_summary']
+                        msg += f"{msgs['calories']}: {totals['calories']} kcal\n"
+                        msg += f"{msgs['protein']}: {totals['protein']}g\n"
+                        msg += f"{msgs['carbs']}: {totals['carbs']}g\n"
+                        msg += f"{msgs['fat']}: {totals['fat']}g\n\n"
+                    else:
+                        msg = msgs['no_meals_today']
 
-        if msg is not None:
-            response.message(msg)
+                elif incoming_msg.startswith('להגדיר יעדים'):
+                    try:
+                        parts = incoming_msg.split()
+                        calories, protein, carbs, fat = map(int, parts[-4:])
+                        user_service.set_user_goals(phone_number, calories, protein, carbs, fat)
+                        msg = msgs['goals_set']
+                    except:
+                        msg = msgs['invalid_goals']
+
+                elif incoming_msg == 'עזרה':
+                    msg = msgs['help_message']
+
+                else:
+                    msg = msgs['general_chat']
+
+        response.message(msg)
         return str(response)
 
     except Exception as e:
@@ -249,7 +196,8 @@ def webhook():
         import traceback
         traceback.print_exc()
         response = MessagingResponse()
-        response.message("מצטערים, משהו השתבש. אנא נסה שוב!")
+        response.message(
+            "Sorry, something went wrong. Please try again!" if lang == 'en' else "מצטערים, משהו השתבש. אנא נסה שוב!")
         return str(response)
 
 
