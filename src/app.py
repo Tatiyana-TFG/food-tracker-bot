@@ -52,7 +52,9 @@ HEBREW_MESSAGES = {
 כתוב 'עזרה' בכל עת לקבלת מידע נוסף! 😊'''
 }
 
-
+@app.route('/')
+def home():
+    return "Bot is running!"
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
