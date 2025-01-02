@@ -75,7 +75,9 @@ def detect_language(text):
         return 'en'
     return 'he'
 
-
+@app.route('/')
+def home():
+    return "Bot is running!"
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
