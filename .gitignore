@@ -5,3 +5,5 @@ __pycache__/
 credentials/
 nutrition.db
 .idea/
+.DS_Store
+**/.DS_Store
