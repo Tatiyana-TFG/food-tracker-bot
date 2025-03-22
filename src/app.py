@@ -17,6 +17,9 @@ vision_service = VisionService()
 nutrition_service = NutritionService()
 user_service = UserService()
 
+# Dictionary to store the goal setting state for each user
+goal_setting_state = {}
+
 # Hebrew translations dictionary
 HEBREW_MESSAGES = {
     'calories': 'קלוריות',
@@ -49,12 +52,42 @@ HEBREW_MESSAGES = {
 🎯 לכתוב 'להגדיר יעדים' כדי להגדיר יעדים תזונתיים יומיים
 📈 לכתוב 'יעדים' כדי לראות את ההתקדמות שלך
 
-כתוב 'עזרה' בכל עת לקבלת מידע נוסף! 😊'''
+כתוב 'עזרה' בכל עת לקבלת מידע נוסף! 😊''',
+    'set_calories': 'הגדר את מספר הקלוריות היומי שלך:',
+    'set_protein': 'הגדר את כמות החלבון היומית שלך (בגרמים):',
+    'set_carbs': 'הגדר את כמות הפחמימות היומית שלך (בגרמים):',
+    'set_fat': 'הגדר את כמות השומן היומית שלך (בגרמים):',
+    'macro_error': 'סך הקלוריות מהפחמימות, חלבונים ושומנים ({used_cals} קק״ל) חורג מהקלוריות היומיות שהגדרת ({total_cals} קק״ל) ב-{excess} קק״ל.\n\nמה ברצונך לעשות?\n1. להתחיל מחדש\n2. להגדיר את השלב האחרון מחדש',
+    'goals_success': """✅ היעדים החדשים שלך נקבעו:
+
+🔥 קלוריות: {actual_cals}/{calories} קק״ל
+🥩 חלבון:    {protein}g ({protein_cals} קק״ל)
+🌾 פחמימות: {carbs}g ({carbs_cals} קק״ל)
+🥑 שומן:     {fat}g ({fat_cals} קק״ל)
+
+שלח 'יעדים' כדי לראות את ההתקדמות שלך! 📊""",
 }
+
+
+# Add a helper function to calculate remaining calories
+def calculate_remaining_calories(state):
+    total_used = 0
+    if 'protein' in state:
+        total_used += state['protein'] * 4
+    if 'carbs' in state:
+        total_used += state['carbs'] * 4
+    if 'fat' in state:
+        total_used += state['fat'] * 9
+
+    remaining = state['calories'] - total_used
+    return remaining, total_used
+
 
 @app.route('/')
 def home():
     return "Bot is running!"
+
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -199,40 +232,154 @@ def webhook():
 
                 print(f"Final message: {msg}")
 
-            elif incoming_msg.startswith('להגדיר יעדים'):
-                print("\n=== Debug: Processing להגדיר יעדים command ===")
+            elif incoming_msg == 'להגדיר יעדים':
+                # Start the goal setting process
+                goal_setting_state[phone_number] = {'step': 'calories'}
+                msg = HEBREW_MESSAGES['set_calories']
+
+            elif phone_number in goal_setting_state and incoming_msg.isdigit():
                 try:
-                    parts = incoming_msg.split()
-                    if len(parts) == 6:  # Command word1 word2 + 4 values
-                        # Parse the values
-                        calories = int(parts[2])
-                        protein = int(parts[3])
-                        carbs = int(parts[4])
-                        fat = int(parts[5])
+                    value = int(incoming_msg)
+                    state = goal_setting_state[phone_number]
 
-                        print(f"Setting goals: calories={calories}, protein={protein}, carbs={carbs}, fat={fat}")
-
-                        # Actually set the goals in the database
-                        if user_service.set_user_goals(phone_number, calories, protein, carbs, fat):
-                            msg = f"""✅ היעדים החדשים שלך נקבעו:
-
-🔥 קלוריות: {calories} קק״ל
-🥩 חלבון:    {protein}g
-🌾 פחמימות: {carbs}g  
-🥑 שומן:     {fat}g
-
-שלח 'יעדים' כדי לראות את ההתקדמות שלך! 📊"""
+                    if state['step'] == 'calories':
+                        if value <= 0:
+                            msg = "ערך הקלוריות חייב להיות חיובי. נסה שוב:"
                         else:
-                            msg = "❌ חלה שגיאה בהגדרת היעדים. אנא נסה שוב."
-                    else:
-                        msg = HEBREW_MESSAGES['set_goals']  # Show the instruction message
-                        print(f"Invalid format: received {len(parts)} parts instead of 6")
-                except ValueError as e:
-                    print(f"Value error parsing goals: {e}")
-                    msg = HEBREW_MESSAGES['invalid_goals']
+                            state['calories'] = value
+                            state['step'] = 'protein'
+                            msg = HEBREW_MESSAGES['set_protein']
+
+                    elif state['step'] == 'protein':
+                        if value < 0:
+                            msg = "ערך החלבון לא יכול להיות שלילי. נסה שוב:"
+                        else:
+                            state['protein'] = value
+                            protein_calories = value * 4
+                            if protein_calories > state['calories']:
+                                msg = f"ערך החלבון שהזנת ({value}g) שווה ל-{protein_calories} קלוריות, יותר מסך הקלוריות שהגדרת ({state['calories']}). נסה שוב:"
+                            else:
+                                state['step'] = 'carbs'
+                                msg = HEBREW_MESSAGES['set_carbs']
+
+                    elif state['step'] == 'carbs':
+                        if value < 0:
+                            msg = "ערך הפחמימות לא יכול להיות שלילי. נסה שוב:"
+                        else:
+                            state['carbs'] = value
+                            remaining, used_cals = calculate_remaining_calories(state)
+                            carbs_calories = value * 4
+
+                            if remaining < 0:
+                                total_cals = state['calories']
+                                excess = abs(remaining)
+                                msg = HEBREW_MESSAGES['macro_error'].format(
+                                    used_cals=used_cals,
+                                    total_cals=total_cals,
+                                    excess=excess
+                                )
+                                state['step'] = 'error'
+                            else:
+                                state['step'] = 'fat'
+                                msg = HEBREW_MESSAGES['set_fat']
+
+                    elif state['step'] == 'fat':
+                        if value < 0:
+                            msg = "ערך השומן לא יכול להיות שלילי. נסה שוב:"
+                        else:
+                            state['fat'] = value
+                            remaining, used_cals = calculate_remaining_calories(state)
+
+                            if remaining < 0:
+                                total_cals = state['calories']
+                                excess = abs(remaining)
+                                msg = HEBREW_MESSAGES['macro_error'].format(
+                                    used_cals=used_cals,
+                                    total_cals=total_cals,
+                                    excess=excess
+                                )
+                                state['step'] = 'error'
+                            else:
+                                # Success - save goals to database
+                                success = user_service.set_user_goals(
+                                    phone_number,
+                                    state['calories'],
+                                    state['protein'],
+                                    state['carbs'],
+                                    state['fat']
+                                )
+
+                                if success:
+                                    protein_cals = state['protein'] * 4
+                                    carbs_cals = state['carbs'] * 4
+                                    fat_cals = state['fat'] * 9
+                                    actual_cals = protein_cals + carbs_cals + fat_cals
+
+                                    msg = HEBREW_MESSAGES['goals_success'].format(
+                                        calories=state['calories'],
+                                        protein=state['protein'],
+                                        carbs=state['carbs'],
+                                        fat=state['fat'],
+                                        protein_cals=protein_cals,
+                                        carbs_cals=carbs_cals,
+                                        fat_cals=fat_cals,
+                                        actual_cals=actual_cals
+                                    )
+                                else:
+                                    msg = "❌ חלה שגיאה בהגדרת היעדים. אנא נסה שוב."
+
+                                # Clear the state now that we're done
+                                del goal_setting_state[phone_number]
+
+                    elif state['step'] == 'error':
+                        # Handle error recovery
+                        if incoming_msg == '1':
+                            # Start over
+                            goal_setting_state[phone_number] = {'step': 'calories'}
+                            msg = HEBREW_MESSAGES['set_calories']
+                        elif incoming_msg == '2':
+                            # Retry last step
+                            if 'fat' in state:
+                                state['step'] = 'fat'
+                                msg = HEBREW_MESSAGES['set_fat']
+                            elif 'carbs' in state:
+                                state['step'] = 'carbs'
+                                msg = HEBREW_MESSAGES['set_carbs']
+                            else:
+                                # Shouldn't get here, but just in case
+                                state['step'] = 'calories'
+                                msg = HEBREW_MESSAGES['set_calories']
+                        else:
+                            msg = "אנא בחר 1 להתחיל מחדש או 2 להגדיר את השלב האחרון מחדש."
+
+                except ValueError:
+                    msg = "אנא הזן מספר בלבד."
                 except Exception as e:
-                    print(f"Error setting goals: {e}")
-                    msg = HEBREW_MESSAGES['invalid_goals']
+                    print(f"Error in goal setting: {str(e)}")
+                    msg = "חלה שגיאה בהגדרת היעדים. אנא נסה שוב מהתחלה."
+                    if phone_number in goal_setting_state:
+                        del goal_setting_state[phone_number]
+
+            elif phone_number in goal_setting_state and goal_setting_state[phone_number]['step'] == 'error':
+                state = goal_setting_state[phone_number]
+                if incoming_msg == '1':
+                    # Start over
+                    goal_setting_state[phone_number] = {'step': 'calories'}
+                    msg = HEBREW_MESSAGES['set_calories']
+                elif incoming_msg == '2':
+                    # Retry last step
+                    if 'fat' in state:
+                        state['step'] = 'fat'
+                        msg = HEBREW_MESSAGES['set_fat']
+                    elif 'carbs' in state:
+                        state['step'] = 'carbs'
+                        msg = HEBREW_MESSAGES['set_carbs']
+                    else:
+                        # Shouldn't get here, but just in case
+                        state['step'] = 'calories'
+                        msg = HEBREW_MESSAGES['set_calories']
+                else:
+                    msg = "אנא בחר 1 להתחיל מחדש או 2 להגדיר את השלב האחרון מחדש."
 
             elif incoming_msg == 'עזרה':
                 msg = HEBREW_MESSAGES['help_message']
