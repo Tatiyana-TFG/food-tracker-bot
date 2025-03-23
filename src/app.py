@@ -189,45 +189,69 @@ def webhook():
 
                 print(f"Final message: {msg}")
 
+
             elif incoming_msg == 'יעדים':
+
                 print("\n=== Debug: Processing יעדים command ===")
+
                 goals = user_service.get_user_goals(phone_number)
+
                 progress_data = nutrition_service.get_daily_progress(phone_number)
 
                 print(f"Goals retrieved: {goals}")
+
                 print(f"Progress data retrieved: {progress_data}")
 
                 if goals and progress_data and progress_data.get('totals'):
+
                     totals = progress_data['totals']
+
                     msg = HEBREW_MESSAGES['progress_bars']
+
                     print(f"Starting with totals: {totals}")
 
                     for nutrient in ['calories', 'protein', 'carbs', 'fat']:
+
                         goal = float(goals.get(nutrient, 0))
+
                         actual = float(totals.get(nutrient, 0))
 
                         print(f"\nDebug - {nutrient}:")
+
                         print(f"Actual: {actual}, Goal: {goal}")
 
                         percentage = (actual / goal * 100) if goal > 0 else 0
+
                         filled_bars = int(percentage // 10)
 
                         print(f"Percentage: {percentage:.1f}%")
+
                         print(f"Filled bars: {filled_bars}")
 
                         bar = '█' * filled_bars + '░' * (10 - filled_bars)
 
                         if nutrient == 'calories':
-                            msg += f"קלוריות: {int(actual)}/{int(goal)} {bar}\n"
-                        elif nutrient == 'protein':
-                            msg += f"חלבון: {int(actual)}/{int(goal)} {bar}\n"
-                        elif nutrient == 'carbs':
-                            msg += f"פחמימות: {int(actual)}/{int(goal)} {bar}\n"
-                        elif nutrient == 'fat':
-                            msg += f"שומן: {int(actual)}/{int(goal)} {bar}\n"
 
-                        print(f"Generated line: {msg.splitlines()[-1]}")
+                            msg += f"🔥 קלוריות: {int(actual)}/{int(goal)}\n{bar}\n\n"
+
+                        elif nutrient == 'protein':
+
+                            msg += f"🥩 חלבון: {int(actual)}/{int(goal)} גרם\n{bar}\n\n"
+
+                        elif nutrient == 'carbs':
+
+                            msg += f"🌾 פחמימות: {int(actual)}/{int(goal)} גרם\n{bar}\n\n"
+
+                        elif nutrient == 'fat':
+
+                            msg += f"🥑 שומן: {int(actual)}/{int(goal)} גרם\n{bar}\n"
+
+                        print(f"Generated line: {msg.splitlines()[-2]}")
+
+                        print(f"Generated bar: {msg.splitlines()[-1]}")
+
                 else:
+
                     msg = "לא נמצאו יעדים או נתוני מעקב. נסה להגדיר יעדים ולהזין ארוחות."
 
                 print(f"Final message: {msg}")
